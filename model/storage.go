@@ -16,6 +16,7 @@ type Storage interface {
 	UpdateAccount(*types.Account) error
 	GetAccounts() ([]*types.Account, error)
 	GetAccountById(int) (*types.Account, error)
+	GetAccountByNumber(int) (*types.Account, error)
 }
 
 type PostgresStore struct {
@@ -50,6 +51,7 @@ func (s *PostgresStore) createAccountTable() error {
 		first_name varchar(50),
 		last_name varchar(50),
 		number serial,
+		encrypted_password varchar(100),
 		balance serial,
 		created_at timestamp
 	)`
@@ -65,17 +67,19 @@ func (s *PostgresStore) CreateAccount(acc *types.Account) error {
 		first_name,
 		last_name,
 		number,
+		encrypted_password,
 		balance,
 		created_at
 	)VALUES
 	(
-		$1, $2, $3, $4, $5)`
+		$1, $2, $3, $4, $5, $6)`
 
-	resp, err := s.db.Query(
+	_, err := s.db.Query(
 		query,
 		acc.FirstName,
 		acc.LastName,
 		acc.Number,
+		acc.EncryptedPassword,
 		acc.Balance,
 		acc.CreatedAt,
 	)
@@ -84,8 +88,6 @@ func (s *PostgresStore) CreateAccount(acc *types.Account) error {
 		return err
 	}
 
-	fmt.Printf("%+v\n", resp)
-
 	return nil
 }
 
@@ -93,34 +95,94 @@ func (s *PostgresStore) UpdateAccount(*types.Account) error {
 	return nil
 }
 func (s *PostgresStore) DeleteAccount(id int) error {
-	return nil
+
+	_, err := s.db.Query(`
+		DELETE
+		FROM
+		accounts
+		WHERE
+		id = $1`, id)
+
+	return err
 }
-func (s *PostgresStore) GetAccountById(int) (*types.Account, error) {
-	return nil, nil
+func (s *PostgresStore) GetAccountById(id int) (*types.Account, error) {
+
+	rows, err := s.db.Query(`
+			SELECT
+			 	* 
+			FROM accounts
+			WHERE 
+			id = $1`, id)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		return scanIntoAccount(rows)
+	}
+
+	return nil, fmt.Errorf("account %d not found", id)
 }
 
 func (s *PostgresStore) GetAccounts() ([]*types.Account, error) {
-	rows, err := s.db.Query("SELECT * FROM accounts")
+
+	rows, err := s.db.Query(`
+			SELECT
+				* 
+			FROM
+			accounts`)
 	if err != nil {
 		return nil, err
 	}
 
 	accounts := []*types.Account{}
 	for rows.Next() {
-		account := new(types.Account)
-		err := rows.Scan(&account.ID,
-			&account.FirstName,
-			&account.LastName,
-			&account.Number,
-			&account.Balance,
-			&account.CreatedAt)
-
+		account, err := scanIntoAccount(rows)
 		if err != nil {
 			return nil, err
 		}
-
 		accounts = append(accounts, account)
 	}
 
 	return accounts, nil
+}
+
+// Step 5
+func (s *PostgresStore) GetAccountByNumber(number int) (*types.Account, error) {
+	rows, err := s.db.Query(`
+			SELECT
+				* 
+			FROM
+			accounts
+			WHERE
+			number = $1`, number)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		return scanIntoAccount(rows)
+	}
+
+	return nil, fmt.Errorf("account with number [%d] not found", number)
+}
+
+// end
+
+func scanIntoAccount(rows *sql.Rows) (*types.Account, error) {
+
+	account := new(types.Account)
+	err := rows.Scan(
+		&account.ID,
+		&account.FirstName,
+		&account.LastName,
+		&account.Number,
+		&account.EncryptedPassword,
+		&account.Balance,
+		&account.CreatedAt,
+	)
+
+	return account, err
 }
